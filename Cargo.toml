@@ -1,0 +1,8 @@
+[package]
+name = "fit2json"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+fitparser = "0.10.0"
+rayon = "1.12.0"
