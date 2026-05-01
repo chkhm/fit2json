@@ -4,8 +4,9 @@ use std::io::Write;
 use std::fs::File;
 use std::env;
 use rayon::prelude::*;
+use chrono::{DateTime, Utc};
 
-use fitparser::FitDataRecord;
+use fitparser::{FitDataRecord, Value};
 use fitparser::profile::field_types::MesgNum;
 
 fn count_kinds(data: &Vec<FitDataRecord>) -> HashMap<String, usize> {
@@ -29,12 +30,13 @@ fn count_kinds(data: &Vec<FitDataRecord>) -> HashMap<String, usize> {
         )
 }
 
-fn select_kind(data: &Vec<FitDataRecord>, kind_name : MesgNum) -> Vec<FitDataRecord> {
+fn select_kind(data: &Vec<FitDataRecord>, kind_name : MesgNum /* , from_ts: DateTime<Utc>, until_ts: DateTime<Utc> */) -> Vec<FitDataRecord> {
     data.into_par_iter()
         .fold(
             || Vec::new(),
             |mut acc, entry| {
                 let kind = entry.kind();
+                // let entry_from = entry.fields().iter().find(|f| f.name() == "timestamp").and_then(|f| DateTime::parse_from_str(f.value().as_datetime(), fmt)); 
                 if kind == kind_name {
                     acc.push(entry.clone());
                 }
@@ -71,6 +73,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fileidrecord = select_kind(&data, MesgNum::FileId);
 
     println!("FileId: {:#?}", fileidrecord);
+
+    let fileid_ts_value = fileidrecord[0].fields().iter().find(|f| f.name() == "time_created").unwrap().value();
+    let fielid_ts = match fileid_ts_value {
+        Value::Timestamp(ts) => *ts,
+        _ => panic!("Expected a DateTime value for time_created"),
+    };
+
+    println!("File created at: {}", fielid_ts);
+
 
     // Step 2: print the parsed data into the output file
     let s = serde_json::to_string_pretty(&data)?;
