@@ -4,7 +4,7 @@ use std::io::Write;
 use std::fs::File;
 use std::env;
 use rayon::prelude::*;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Local};
 
 use fitparser::{FitDataRecord, Value};
 use fitparser::profile::field_types::MesgNum;
@@ -30,13 +30,13 @@ fn count_kinds(data: &Vec<FitDataRecord>) -> HashMap<String, usize> {
         )
 }
 
-fn select_kind(data: &Vec<FitDataRecord>, kind_name : MesgNum /* , from_ts: DateTime<Utc>, until_ts: DateTime<Utc> */) -> Vec<FitDataRecord> {
+fn select_kind(data: &Vec<FitDataRecord>, kind_name : MesgNum) -> Vec<FitDataRecord> {
     data.into_par_iter()
         .fold(
             || Vec::new(),
             |mut acc, entry| {
                 let kind = entry.kind();
-                // let entry_from = entry.fields().iter().find(|f| f.name() == "timestamp").and_then(|f| DateTime::parse_from_str(f.value().as_datetime(), fmt)); 
+
                 if kind == kind_name {
                     acc.push(entry.clone());
                 }
@@ -52,6 +52,53 @@ fn select_kind(data: &Vec<FitDataRecord>, kind_name : MesgNum /* , from_ts: Date
         )
 }
 
+
+fn select_kind_with_ts(data: &Vec<FitDataRecord>, kind_name : MesgNum, from_ts: DateTime<Local>, until_ts: DateTime<Local>) -> Vec<FitDataRecord> {
+    data.into_par_iter()
+        .fold(
+            || Vec::new(),
+            |mut acc, entry| {
+                let kind = entry.kind();
+
+                if kind == kind_name {
+                    let datafield = entry.fields().iter().find(|f| f.name() == "timestamp");
+                    let entry_from = match datafield {
+                        Some(f) => match f.value() {
+                            Value::Timestamp(ts) => *ts,
+                            _ => return acc, // Skip if timestamp field is not a DateTime
+                        },
+                        None => return acc, // Skip if no timestamp field found
+                    };
+                    if entry_from >= from_ts && entry_from < until_ts {
+                        acc.push(entry.clone());
+                    }
+                }
+                acc
+            }
+        )
+
+        .reduce(
+            ||Vec::new(),
+            |m1 : Vec<FitDataRecord>, m2 : Vec<FitDataRecord>| {
+                m1.into_iter().chain(m2).collect()
+            }
+        )
+}
+
+fn kind_and_ts_to_str(record : &FitDataRecord) -> String {
+    let kind = record.kind();
+    let ts_field = record.fields().iter().find(|f| f.name() == "timestamp");
+    let ts_str = match ts_field {
+        Some(f) => match f.value() {
+            Value::Timestamp(ts) => ts.to_string(),
+            _ => "N/A".to_string(),
+        },
+        None => "N/A".to_string(),
+    };
+    format!("{}: {}", kind, ts_str)
+}
+
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args : Vec<String> = env::args().collect();
     let fit_file = args.get(1).unwrap_or_else(|| {
@@ -61,6 +108,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let default_out = "parsed_content.json".to_string();
     let out_file = args.get(2).unwrap_or(&default_out);
 
+    // Step 0: Parse the FIT file and print the profile version
     println!("Parsing FIT files using Profile version: {}", fitparser::profile::VERSION);
     let mut fp = File::open(fit_file)?;
     let mut ofp = File::create(out_file)?;
@@ -69,25 +117,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Step 1: Count the entries
     let kind_counter = count_kinds(&data);
-
+    
+    // Step 2: Select FileId record and print the time_created field
     let fileidrecord = select_kind(&data, MesgNum::FileId);
-
     println!("FileId: {:#?}", fileidrecord);
-
     let fileid_ts_value = fileidrecord[0].fields().iter().find(|f| f.name() == "time_created").unwrap().value();
     let fielid_ts = match fileid_ts_value {
         Value::Timestamp(ts) => *ts,
         _ => panic!("Expected a DateTime value for time_created"),
     };
-
     println!("File created at: {}", fielid_ts);
 
+    println!("\n\n------------------------------\n\n");
 
-    // Step 2: print the parsed data into the output file
+    // Step 3: Select Record records created within a specific time range
+    let from_ts = chrono::Local.with_ymd_and_hms(2026, 04, 23, 09, 58, 43).unwrap(); // 2026-04-23T09:58:43-04:00
+    let until_ts = from_ts + chrono::TimeDelta::seconds(5); // 5 seconds later
+    let records = select_kind_with_ts(&data, MesgNum::Record, from_ts, until_ts);
+    println!("Number of records in range: {}", records.len());
+    for r in records {
+        let s = kind_and_ts_to_str(&r);
+        println!("{}", s);
+    }
+    
+
+    // Step 4: print the parsed data into the output file in json format
     let s = serde_json::to_string_pretty(&data)?;
     writeln!(ofp, "{}", s)?;
 
-    // Step 3: print the counting results
+    println!("\n\n------------------------------\n\n");
+
+    // Step 5: print the counting results
     for (kind, count) in kind_counter {
         println!("{}: {}", kind, count);
     }
