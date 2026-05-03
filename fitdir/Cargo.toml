@@ -1,0 +1,17 @@
+[package]
+name              = "fitdir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description       = "Batch-process all FIT files in a directory"
+
+[[bin]]
+name = "fitdir"
+path = "src/main.rs"
+
+[dependencies]
+fitlib   = { path = "../fitlib" }
+clap     = { workspace = true }
+anyhow   = { workspace = true }
+rayon    = { workspace = true }
+walkdir  = { workspace = true }
