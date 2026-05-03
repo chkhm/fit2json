@@ -185,15 +185,29 @@ fn field_semicircles(record: &FitDataRecord, name: &str) -> Option<f64> {
 }
 
 fn field_altitude(record: &FitDataRecord) -> Option<f64> {
-    // Altitude is stored in metres with a scale of 5 and offset of 500 in the
-    // FIT profile, but fitparser decodes it to the final float value already.
-    record.fields().iter().find(|f| f.name() == "altitude").and_then(|f| {
-        match f.value() {
-            Value::Float64(v) => Some(*v),
-            Value::Float32(v) => Some(*v as f64),
-            _ => None,
+    // fitparser decodes the scale/offset for well-known fields and produces a
+    // Float32 or Float64.  When parsing without full profile decoding (or for
+    // unknown sub-protocols) the raw UInt16 may be returned instead; in that
+    // case apply the FIT profile rule manually: metres = raw/5 − 500.
+    //
+    // Prefer `enhanced_altitude` (higher resolution, present on Edge/Fenix
+    // firmware ≥ 2.x) then fall back to the legacy `altitude` field.
+    for name in &["enhanced_altitude", "altitude"] {
+        if let Some(field) = record.fields().iter().find(|f| f.name() == *name) {
+            let v = match field.value() {
+                Value::Float64(v) => Some(*v),
+                Value::Float32(v) => Some(f64::from(*v)),
+                // Raw unscaled integer: apply FIT profile scale=5 offset=500.
+                Value::UInt16(v)  => Some(*v as f64 / 5.0 - 500.0),
+                Value::UInt32(v)  => Some(*v as f64 / 5.0 - 500.0),
+                _ => None,
+            };
+            if v.is_some() {
+                return v;
+            }
         }
-    })
+    }
+    None
 }
 
 impl From<quick_xml::Error> for FitError {

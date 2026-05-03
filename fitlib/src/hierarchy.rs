@@ -2,8 +2,12 @@
 ///
 /// A FIT file is a flat, chronological binary stream.  This module reconstructs
 /// the containment hierarchy (Activity → Session → Lap → Records) by matching
-/// `start_time` and `timestamp` (end time) fields on `session` and `lap`
-/// summary messages.
+/// `start_time` and `end_time` on `session` and `lap` summary messages.
+///
+/// End time is computed as `start_time + total_elapsed_time` whenever that
+/// field is present (which is the case for all device types, including swimming
+/// and indoor cycling units where `timestamp == start_time`).  The raw
+/// `timestamp` field is used only as a last-resort fallback.
 use chrono::{DateTime, Local};
 use fitparser::profile::field_types::MesgNum;
 use fitparser::{FitDataRecord, Value};
@@ -80,7 +84,7 @@ pub fn build_activity(data: &[FitDataRecord]) -> Result<FitActivity, FitError> {
     let raw_laps: Vec<LapTimeWindow> = data
         .iter()
         .filter(|r| r.kind() == MesgNum::Lap)
-        .map(|r| (field_ts(r, "start_time"), record_timestamp(r)))
+        .map(|r| (field_ts(r, "start_time"), end_time_from_record(r)))
         .collect();
 
     // Collect (start_time, end_time, sport, sub_sport) for every session summary.
@@ -90,7 +94,7 @@ pub fn build_activity(data: &[FitDataRecord]) -> Result<FitActivity, FitError> {
         .map(|r| {
             (
                 field_ts(r, "start_time"),
-                record_timestamp(r),
+                end_time_from_record(r),
                 field_string(r, "sport"),
                 field_string(r, "sub_sport"),
             )
@@ -235,4 +239,33 @@ fn field_u32(record: &FitDataRecord, name: &str) -> Option<u32> {
             _ => None,
         }
     })
+}
+
+/// Read a field whose value is a floating-point number (Float32 or Float64).
+fn field_f64(record: &FitDataRecord, name: &str) -> Option<f64> {
+    record.fields().iter().find(|f| f.name() == name).and_then(|f| {
+        match f.value() {
+            Value::Float64(v) => Some(*v),
+            Value::Float32(v) => Some(f64::from(*v)),
+            _ => None,
+        }
+    })
+}
+
+/// Compute the end time for a session or lap summary record.
+///
+/// Uses `start_time + total_elapsed_time` when both fields are present — this
+/// is the authoritative source and works on swimming and indoor devices where
+/// `timestamp` equals `start_time`.  Falls back to the record's `timestamp`
+/// field only when `total_elapsed_time` is unavailable.
+fn end_time_from_record(record: &FitDataRecord) -> Option<DateTime<Local>> {
+    if let (Some(start), Some(elapsed_secs)) = (
+        field_ts(record, "start_time"),
+        field_f64(record, "total_elapsed_time"),
+    ) {
+        let millis = (elapsed_secs * 1_000.0) as i64;
+        return Some(start + chrono::Duration::milliseconds(millis));
+    }
+    // Fallback: the timestamp field (may equal start_time on some devices).
+    record_timestamp(record)
 }
