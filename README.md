@@ -9,7 +9,7 @@ The tool provides the following features:
   - Generic queries and overall info - useful for creating summary SQL tables
     - overall summary info:
       - user
-      - start and end timestamps, 
+      - start and end timestamps
       - GPS box
       - sport type
       - overall performance statistics
