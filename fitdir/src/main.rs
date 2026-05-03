@@ -1,8 +1,12 @@
-// fitdir: batch-process all FIT files in a directory.
-// Uses rayon for file-level parallelism; all per-file logic lives in fitlib.
-// TODO: implement in Step 13 of the workspace migration plan.
+mod cli;
+mod commands;
+
+use clap::Parser;
 
 fn main() {
-    eprintln!("fitdir is not yet implemented");
-    std::process::exit(1);
+    let cli = cli::Cli::parse();
+    if let Err(e) = commands::dispatch(cli) {
+        eprintln!("Error: {e:#}");
+        std::process::exit(1);
+    }
 }

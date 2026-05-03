@@ -9,11 +9,11 @@ A collection of fast, composable command-line tools for reading and analysing Ga
 
 ## Tools
 
-| Binary | Purpose |
-|---|---|
-| `fit2json` | Query, filter, and extract data from a single FIT file |
-| `fitdir` | Batch-process all FIT files in a directory *(planned)* |
-| `fithistory` | Unpack and ingest a Garmin Connect bulk-export ZIP *(planned)* |
+| Binary       | Purpose                                                          |
+|--------------|------------------------------------------------------------------|
+| `fit2json`   | Query, filter, and extract data from a single FIT file           |
+| `fitdir`     | Batch-process all FIT files in a directory *(planned)*           |
+| `fithistory` | Unpack and ingest a Garmin Connect bulk-export ZIP *(planned)*   |
 
 ---
 
@@ -259,7 +259,7 @@ remainder are device-management and health-monitoring files.  `fitparser` return
 for type codes that are not in the public FIT profile.
 
 | `filetype` output | FIT type code | Approx. count | Key message types | Notes |
-|---|---|---|---|---|
+|-------------------|---------------|---------------|-------------------|-------||
 | `activity` | 4 | 353 | `session`, `lap`, `record`, … | Standard workout recordings; the only type supported by `info`, `sessions`, `laps`. |
 | `monitoring_b` | 32 | 2 650 | `monitoring`, `monitoring_hr_data`, `monitoring_info`, `stress_level`, `respiration_rate` | Continuous health monitoring (HR, stress, respiration).  Stored in circular buffers; one file covers roughly one day. |
 | `segment_list` | 35 | 392 | `segment_file` (×57) | Directory of on-device segments (Strava segments etc.).  Contains no time-series data. |

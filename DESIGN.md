@@ -19,6 +19,7 @@ For the requirements catalogue see [REQUIREMENTS.md](REQUIREMENTS.md).
 7. [Design decisions](#design-decisions)
 8. [Dependency rationale](#dependency-rationale)
 9. [Roadmap](#roadmap)
+10. [FIT format stability and versioning strategy](#fit-format-stability-and-versioning-strategy)
 
 ---
 
@@ -88,6 +89,7 @@ fit2json/                       ← workspace root
 │   └── src/
 │       ├── lib.rs
 │       ├── error.rs
+│       ├── fields.rs
 │       ├── parse.rs
 │       ├── filter.rs
 │       ├── hierarchy.rs
@@ -113,7 +115,8 @@ fit2json/                       ← workspace root
 │           ├── sessions.rs
 │           ├── laps.rs
 │           ├── validate.rs
-│           └── compare.rs
+│           ├── compare.rs
+│           └── filetype.rs
 │
 ├── fitdir/                     ← batch-directory binary (stub)
 │   ├── Cargo.toml
@@ -146,6 +149,21 @@ pub enum FitError {
 ```
 
 Binary crates wrap `FitError` with `anyhow` for ergonomic `?`-propagation and human-readable error messages. Library callers can match on variants for structured handling.
+
+### `fields.rs` — centralised field-name resolver
+
+```rust
+pub fn resolve_field<'r>(record: &'r FitDataRecord, logical: &str) -> Option<&'r Value>
+pub fn field_f64(record: &FitDataRecord, logical: &str) -> Option<f64>
+pub fn field_u32(record: &FitDataRecord, logical: &str) -> Option<u32>
+pub fn field_altitude(record: &FitDataRecord) -> Option<f64>
+```
+
+This module is the **single place to update** when Garmin introduces a new `enhanced_*` field variant on newer firmware — see [FIT format stability and versioning strategy](#fit-format-stability-and-versioning-strategy) for the full rationale.
+
+`resolve_field` checks whether a known `enhanced_*` alias exists for the requested logical name, tries that first, then falls back to the literal name.  Adding a new alias is one line in its `match` arm.  All typed helpers (`field_f64`, `field_u32`, `field_altitude`) call `resolve_field` internally, so every call site throughout the codebase benefits automatically.
+
+`field_altitude` has a special case beyond name resolution: when the raw `UInt16`/`UInt32` value is returned (fitparser without full profile decoding), it applies the FIT spec's scale/offset rule: `metres = raw / 5 − 500`.
 
 ### `parse.rs` — I/O entry points
 
@@ -222,10 +240,11 @@ GeoJSON is constructed as `serde_json::Value` directly — no additional crate i
 
 `validate(data)` runs all checks and returns a `ValidationReport`:
 
-- **Required messages**: `file_id` and `activity` must be present.
-- **Session count**: `activity.num_sessions` must match the number of `session` records found.
+- **Required messages**: `file_id` must be present; `activity` message required only for activity-type files.
+- **Session count**: `activity.num_sessions` must match the number of `session` records found (activity files only).
 - **Timestamp ordering**: `record` timestamps must be monotonically non-decreasing.
 - **Developer fields**: noted as `Info` if `developer_data_id` messages are present (signals Connect IQ custom data).
+- **File type note**: for non-activity files an `Info`-level issue is emitted identifying the type, and the activity-specific checks are skipped rather than reported as errors.
 
 CRC verification is not yet implemented at the `fitparser` API level; it will be added when the upstream crate exposes the raw byte stream.
 
@@ -261,6 +280,7 @@ Declares the subcommand modules and exposes three shared helpers used by every s
 | `resolve_input` | Picks the input path from the subcommand positional arg or the global `--input` flag. |
 | `write_output` | Writes a string to the `--output` file or to stdout. |
 | `to_json` | Serialises a value as pretty or compact JSON based on the global flags. |
+| `require_activity_file` | Returns an error with a descriptive message if the parsed data is not from an activity file; passes through when the type is `"activity"` or cannot be determined. Called at the top of every subcommand that requires the session/lap hierarchy. |
 
 ### Each subcommand module
 
@@ -382,3 +402,61 @@ Items are roughly ordered by implementation dependency.
 - [ ] Ramer-Douglas-Peucker GPS simplification for `gps --simplify`
 - [ ] Shell completions (`fit2json completions bash/zsh/fish`)
 - [ ] `--field` projection in `select` (output only named fields per record)
+
+---
+
+## FIT format stability and versioning strategy
+
+### Threat model
+
+The FIT specification has three distinct layers with very different rates of change:
+
+| Layer | What it covers | Change rate |
+|---|---|---|
+| **Protocol** | Binary framing, CRC, record headers | Essentially frozen; Garmin has been on protocol 2.x for over a decade. `fitparser` handles this transparently. |
+| **Profile** | Message definitions, field names, units, enum values | Additive changes roughly quarterly. New fields appear; existing semantics are stable. |
+| **Device/undocumented** | Numeric type codes (44, 58, 68, …) and `unknown_field_N` values | Opaque; can change with any firmware release. |
+
+### Garmin's primary versioning pattern
+
+Profile changes are almost always **additive**: a new higher-resolution variant of an existing field is introduced alongside the original rather than replacing it. The clearest examples observed in real files:
+
+| Legacy field | Enhanced variant | Introduced |
+|---|---|---|
+| `altitude` | `enhanced_altitude` | Edge/Fenix firmware ≥ 2.x |
+| `speed` | `enhanced_speed` | Fenix/Forerunner |
+| `avg_speed` | `enhanced_avg_speed` | Session-level summary fields |
+| `max_speed` | `enhanced_max_speed` | Session-level summary fields |
+
+Semantically breaking changes — renaming a field, changing its unit, reversing an enum — are extremely rare because Garmin's own Connect platform and thousands of third-party integrations would break simultaneously.
+
+### Why `fields.rs` was created
+
+Before `fields.rs` existed, the `enhanced_*` fallback logic was duplicated in two places using inconsistent patterns: `gps.rs` used an explicit loop over a hardcoded name slice; `info.rs` used inline `.or_else()` chains. When Garmin introduces the next alias, every affected call site would have needed a separate edit, and the risk of missing one was real.
+
+`fields.rs` centralises all alias resolution behind `resolve_field(record, logical_name)`. Adding a new alias is a single `match` arm in one function. Every typed helper (`field_f64`, `field_u32`, `field_altitude`) calls `resolve_field` internally, so all call sites benefit without any further changes.
+
+### What is deliberately not built
+
+A general-purpose version-dispatch system (detect profile version, switch behaviour) was considered and rejected. The complexity would be high and the benefit low because:
+
+1. The core activity structure (session/lap/record hierarchy) has been unchanged for 10+ years.
+2. New fields on existing messages appear as `unknown_field_N` — harmlessly ignorable with `--no-unknown`.
+3. New message types appear as numeric `MesgNum` values — also harmlessly ignorable.
+4. The one pattern that does break code (`enhanced_*` aliases) is handled by `fields.rs` without version detection.
+
+### Handling `fitparser` profile lag
+
+`fitparser` bundles a specific FIT profile snapshot and is updated independently of Garmin firmware releases. A new Garmin device may produce fields that appear as `unknown_field_N` for a few weeks until a `fitparser` update arrives. The appropriate response is:
+
+1. Check whether a newer `fitparser` is available and update `Cargo.toml`.
+2. If the field is structurally new (a new `enhanced_*` alias), add it to `fields.rs`.
+3. Document the finding in the README quirks section.
+
+`fitparser` is pinned to an exact version (`= 0.10.0`) rather than a semver range so upgrades are deliberate and tested, not silent.
+
+### Non-activity file types
+
+A Garmin Connect bulk export contains far more than workout recordings. Analysis of a 9 182-file sample showed only 3.8% were activity files; the remainder were monitoring, configuration, segment, and HRV files with numeric type codes not in the public profile (see `test-results/file-type-survey-UploadedFiles_0-_Part6.md`).
+
+`fitlib::file_type(data)` performs a fast O(n) scan of the `file_id` record to return the type string. Subcommands that require the activity hierarchy call `require_activity_file` at entry and return a descriptive error for other types. `fitdir` uses `file_type()` as a pre-filter to skip ~96% of files before calling the expensive `build_activity()`.

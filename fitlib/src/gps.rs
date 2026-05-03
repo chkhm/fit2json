@@ -47,7 +47,7 @@ pub fn extract_track(data: &[FitDataRecord]) -> Vec<GpsPoint> {
         .filter_map(|r| {
             let lat = field_semicircles(r, "position_lat")?;
             let lon = field_semicircles(r, "position_long")?;
-            let altitude_m = field_altitude(r);
+            let altitude_m = crate::fields::field_altitude(r);
             Some(GpsPoint {
                 position: LatLon { lat, lon },
                 altitude_m,
@@ -182,32 +182,6 @@ fn field_semicircles(record: &FitDataRecord, name: &str) -> Option<f64> {
             _ => None,
         }
     })
-}
-
-fn field_altitude(record: &FitDataRecord) -> Option<f64> {
-    // fitparser decodes the scale/offset for well-known fields and produces a
-    // Float32 or Float64.  When parsing without full profile decoding (or for
-    // unknown sub-protocols) the raw UInt16 may be returned instead; in that
-    // case apply the FIT profile rule manually: metres = raw/5 − 500.
-    //
-    // Prefer `enhanced_altitude` (higher resolution, present on Edge/Fenix
-    // firmware ≥ 2.x) then fall back to the legacy `altitude` field.
-    for name in &["enhanced_altitude", "altitude"] {
-        if let Some(field) = record.fields().iter().find(|f| f.name() == *name) {
-            let v = match field.value() {
-                Value::Float64(v) => Some(*v),
-                Value::Float32(v) => Some(f64::from(*v)),
-                // Raw unscaled integer: apply FIT profile scale=5 offset=500.
-                Value::UInt16(v)  => Some(*v as f64 / 5.0 - 500.0),
-                Value::UInt32(v)  => Some(*v as f64 / 5.0 - 500.0),
-                _ => None,
-            };
-            if v.is_some() {
-                return v;
-            }
-        }
-    }
-    None
 }
 
 impl From<quick_xml::Error> for FitError {
