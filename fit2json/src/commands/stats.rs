@@ -5,7 +5,7 @@ use clap::{Args, ValueEnum};
 use fitparser::FitDataRecord;
 
 use crate::cli::GlobalArgs;
-use crate::commands::{resolve_input, to_json, write_output};
+use crate::commands::{require_activity_file, resolve_input, to_json, write_output};
 
 #[derive(ValueEnum, Clone, Default)]
 pub enum AggBy {
@@ -34,6 +34,12 @@ pub struct StatsArgs {
 pub fn run(global: &GlobalArgs, args: StatsArgs) -> Result<()> {
     let path = resolve_input(global, &args.input)?;
     let data = fitlib::parse::load_file(&path)?;
+
+    // Guard hierarchy-dependent modes before the expensive build_activity call.
+    if matches!(args.by, AggBy::Session | AggBy::Lap) {
+        require_activity_file(&data, "stats --by session/lap")?;
+    }
+
     let activity = fitlib::hierarchy::build_activity(&data)?;
 
     let field_filter: Vec<&str> = args

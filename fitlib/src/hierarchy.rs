@@ -30,6 +30,8 @@ pub struct FileIdInfo {
     pub manufacturer: Option<String>,
     pub product: Option<String>,
     pub serial_number: Option<u32>,
+    /// FIT file type string (e.g. `"activity"`, `"workout"`, `"course"`).
+    pub file_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -200,6 +202,7 @@ fn build_file_id_info(data: &[FitDataRecord]) -> FileIdInfo {
             manufacturer: None,
             product: None,
             serial_number: None,
+            file_type: None,
         };
     };
     FileIdInfo {
@@ -207,6 +210,7 @@ fn build_file_id_info(data: &[FitDataRecord]) -> FileIdInfo {
         manufacturer: field_string(rec, "manufacturer"),
         product: field_string(rec, "product_name"),
         serial_number: field_u32(rec, "serial_number"),
+        file_type: field_string(rec, "type"),
     }
 }
 

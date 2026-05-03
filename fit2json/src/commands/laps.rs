@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::cli::GlobalArgs;
-use crate::commands::{resolve_input, to_json, write_output};
+use crate::commands::{require_activity_file, resolve_input, to_json, write_output};
 
 #[derive(Args)]
 pub struct LapsArgs {
@@ -19,6 +19,7 @@ pub struct LapsArgs {
 pub fn run(global: &GlobalArgs, args: LapsArgs) -> Result<()> {
     let path = resolve_input(global, &args.input)?;
     let data = fitlib::parse::load_file(&path)?;
+    require_activity_file(&data, "laps")?;
     let activity = fitlib::hierarchy::build_activity(&data)?;
 
     let laps: Vec<_> = match args.session {

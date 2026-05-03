@@ -36,16 +36,35 @@ pub struct ValidationReport {
 /// Run all structural and logical checks against `data`.
 ///
 /// Checks performed:
-/// - Required messages: `file_id` and `activity` must be present.
-/// - Session count: `activity.num_sessions` must match the number of `session` records.
+/// - Required messages: `file_id` must be present; `activity` message required
+///   only for activity-type files.
+/// - Session count: `activity.num_sessions` must match the number of `session`
+///   records (activity files only).
 /// - Timestamp ordering: `record` timestamps must be monotonically non-decreasing.
-/// - GPS outliers: consecutive GPS positions must not jump more than 1 000 m in < 1 s.
 /// - Developer fields: noted as `Info` if `developer_data_id` messages are present.
+///
+/// For non-activity files an `Info`-level note is added identifying the file type.
 pub fn validate(data: &[FitDataRecord]) -> ValidationReport {
     let mut issues = Vec::new();
 
-    check_required_messages(data, &mut issues);
-    check_session_count(data, &mut issues);
+    let file_type = crate::file_type(data);
+    let is_activity = file_type.as_deref().is_none_or(|t| t == "activity");
+
+    if let Some(ref ft) = file_type
+        && !is_activity
+    {
+        issues.push(ValidationIssue {
+            severity: Severity::Info,
+            message: format!(
+                "File type is `{ft}` (not `activity`); activity-specific checks are skipped"
+            ),
+        });
+    }
+
+    check_required_messages(data, is_activity, &mut issues);
+    if is_activity {
+        check_session_count(data, &mut issues);
+    }
     check_timestamp_ordering(data, &mut issues);
     check_developer_fields(data, &mut issues);
 
@@ -57,14 +76,18 @@ pub fn validate(data: &[FitDataRecord]) -> ValidationReport {
 // Individual checks
 // ---------------------------------------------------------------------------
 
-fn check_required_messages(data: &[FitDataRecord], issues: &mut Vec<ValidationIssue>) {
+fn check_required_messages(
+    data: &[FitDataRecord],
+    is_activity: bool,
+    issues: &mut Vec<ValidationIssue>,
+) {
     if !data.iter().any(|r| r.kind() == MesgNum::FileId) {
         issues.push(ValidationIssue {
             severity: Severity::Error,
             message: "Missing required 'file_id' message".to_string(),
         });
     }
-    if !data.iter().any(|r| r.kind() == MesgNum::Activity) {
+    if is_activity && !data.iter().any(|r| r.kind() == MesgNum::Activity) {
         issues.push(ValidationIssue {
             severity: Severity::Error,
             message: "Missing required 'activity' message".to_string(),

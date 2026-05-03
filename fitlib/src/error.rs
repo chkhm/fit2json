@@ -27,4 +27,7 @@ pub enum FitError {
 
     #[error("lap index {0} out of range in session {1}")]
     LapOutOfRange(usize, usize),
+
+    #[error("the `{cmd}` command only applies to activity files (this file has type `{file_type}`)")]
+    NotAnActivityFile { cmd: String, file_type: String },
 }

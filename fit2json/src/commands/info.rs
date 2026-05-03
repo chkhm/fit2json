@@ -7,7 +7,7 @@ use fitparser::Value;
 use serde::Serialize;
 
 use crate::cli::GlobalArgs;
-use crate::commands::{resolve_input, to_json, write_output};
+use crate::commands::{require_activity_file, resolve_input, to_json, write_output};
 
 #[derive(Args)]
 pub struct InfoArgs {
@@ -53,6 +53,7 @@ struct ActivitySummary {
 pub fn run(global: &GlobalArgs, args: InfoArgs) -> Result<()> {
     let path = resolve_input(global, &args.input)?;
     let data = fitlib::parse::load_file(&path)?;
+    require_activity_file(&data, "info")?;
     let activity = fitlib::hierarchy::build_activity(&data)?;
 
     // Pull the first session record directly for its pre-computed summary fields.

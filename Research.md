@@ -2,29 +2,29 @@
 
 ## Overview of FIT file format
 
-A Garmin FIT (Flexible and Interoperable Data Transfer) file is a binary format that stores fitness and activity data (like GPS coordinates, heart rate, and power). It consists of a standard file header, followed by a sequence of Definition Messages and Data Messages, and ends with a Cyclic Redundancy Check (CRC). [1, 2, 3, 4] 
+A Garmin FIT (Flexible and Interoperable Data Transfer) file is a binary format that stores fitness and activity data (like GPS coordinates, heart rate, and power). It consists of a standard file header, followed by a sequence of Definition Messages and Data Messages, and ends with a Cyclic Redundancy Check (CRC). [1, 2, 3, 4]
 Here is a detailed breakdown of its structure:
 
-## 1. File Header [4] 
+## 1. File Header [4]
 
-Every FIT file begins with a fixed-length header (usually 14 bytes) that contains essential metadata: [4, 5, 6] 
+Every FIT file begins with a fixed-length header (usually 14 bytes) that contains essential metadata: [4, 5, 6]
 
 * Header Size: Length of the header (e.g., 12 or 14 bytes).
 * Protocol Version: The FIT profile version being used.
 * Profile Version: Specific version of the FIT profile.
 * File Size: The size of the data records in bytes.
-* Data Type: String indicating the file type (.FIT). [7, 8, 9, 10, 11] 
+* Data Type: String indicating the file type (.FIT). [7, 8, 9, 10, 11]
 
 ## 2. Message Architecture
 
-The core of the file is a continuous stream of messages representing the activity over time. These come in two forms: [12] 
+The core of the file is a continuous stream of messages representing the activity over time. These come in two forms: [12]
 
 * Definition Messages: Describe the structure of the data that is about to follow (e.g., specifying that a "Record" message will contain GPS coordinates, Heart Rate, and Altitude).
-* Data Messages: The actual, populated data that adheres to the preceding definition. [1, 2, 13, 14, 15] 
+* Data Messages: The actual, populated data that adheres to the preceding definition. [1, 2, 13, 14, 15]
 
 ## 3. Key Message Types
 
-Within an Activity FIT file, data is written chronologically using specific message types: [2, 13, 16] 
+Within an Activity FIT file, data is written chronologically using specific message types: [2, 13, 16]
 
 * File ID: The very first message. Identifies the file type (Activity, Course, Workout), manufacturer, device serial number, and product number.
 * Device Info: Contains details about the hardware recording the data, its version, and battery status.
@@ -32,11 +32,11 @@ Within an Activity FIT file, data is written chronologically using specific mess
 * Lap: Summarizes specific segments (e.g., 1-mile splits or manually triggered laps).
 * Record: The timestamped, real-time metrics recorded every second (GPS, heart rate, cadence, power, etc.).
 * Event: Records specific occurrences like pausing the timer, starting a lap, or powering off.
-* Developer Data Id: Contains identifying information if custom Connect IQ data fields are being tracked. [2, 16, 17, 18, 19] 
+* Developer Data Id: Contains identifying information if custom Connect IQ data fields are being tracked. [2, 16, 17, 18, 19]
 
 ## 4. File Footer (CRC)
 
-The file ends with a 2-byte CRC (Cyclic Redundancy Check). This is used to verify the integrity of the file, ensuring that the data was not corrupted during saving or transferring. [4, 20] 
+The file ends with a 2-byte CRC (Cyclic Redundancy Check). This is used to verify the integrity of the file, ensuring that the data was not corrupted during saving or transferring. [4, 20]
 
 ------------------------------
 
@@ -67,37 +67,62 @@ Note: Because FIT is a highly compressed binary file, you cannot read it with a 
 ------------------------------
 ------------------------------
 
-## What is the hierarchy of a fit file?
+## What is the hierarchy of a fit file for activities (file_id/type=4)?
 
-While a Garmin FIT file is recorded as a continuous, chronological stream of flat binary messages, it maintains a strict logical hierarchy. This hierarchy allows platforms like Strava or Garmin Connect to group micro-level tracking data into macro-level session summaries. [1, 2, 3, 4] 
+While a Garmin FIT file is recorded as a continuous, chronological stream of flat binary messages, it maintains a strict logical hierarchy. This hierarchy allows platforms like Strava or Garmin Connect to group micro-level tracking data into macro-level session summaries. [1, 2, 3, 4]
 The conceptual structure of a typical multi-sport (or single-sport) activity file is organized according to this specific data hierarchy:
 
 ## 1. File Level (The Root)
 
-This is the master envelope for all data. It is the absolute base of the file and does not repeat. [5] 
+This is the master envelope for all data. It is the absolute base of the file and does not repeat. [5]
 
-* File ID Message: The master descriptor. It identifies the file type (Activity), the device, and the manufacturer. [1] 
+* File ID Message: The master descriptor. It identifies the file type (Activity), the device, and the manufacturer. [1]
+
+The key information in the File ID message is the type. The following table lists all known types. Note that Garmin has many other file types for which they do no tell us what their meaning is:
+
+| Type Name         | Value.    | Comment                                                                                             |
+|-------------------|-----------|-----------------------------------------------------------------------------------------------------|
+| device            | 1         | Read only, single file. Must be in root directory.                                                  |
+| settings          | 2         | Read/write, single file. Directory=Settings                                                         |
+| sport             | 3         | Read/write, multiple files, file number = sport type. Directory=Sports                              |
+| activity          | 4         | Read/erase, multiple files. Directory=Activities                                                    |
+| workout           | 5         | Read/write/erase, multiple files. Directory=Workouts                                                |
+| course            | 6         | Read/write/erase, multiple files. Directory=Courses                                                 |
+| schedules         | 7         | Read/write, single file. Directory=Schedules                                                        |
+| weight            | 9         | Read only, single file. Circular buffer. All message definitions at start of file. Directory=Weight |
+| totals            | 10        | Read only, single file. Directory=Totals                                                            |
+| goals             | 11        | Read/write, single file. Directory=Goals                                                            |
+| blood_pressure    | 14        | Read only. Directory=Blood Pressure                                                                 |
+| monitoring_a      | 15        | Read only. Directory=Monitoring. File number=sub type.                                              |
+| activity_summary  | 20        | Read/erase, multiple files. Directory=Activities                                                    |
+| monitoring_daily  | 28        |                                                                                                     |
+| monitoring_b      | 32        | Read only. Directory=Monitoring. File number=identifier                                             |
+| segment           | 34        | Read/write/erase. Multiple Files. Directory=Segments                                                |
+| segment_list      | 35        | Read/write/erase. Single File. Directory=Segments                                                   |
+| exd_configuration | 40        | Read/write/erase. Single File. Directory=Settings                                                   |
+| mfg_range_min     | 0xF7      |  0xF7 - 0xFE reserved for manufacturer specific file types                                          |
+| mfg_range_max     | 0xFE      |  0xF7 - 0xFE reserved for manufacturer specific file types                                          |
 
 ## 2. Activity Level
 
-This encapsulates everything that occurred from the moment you pressed Start on your device to the moment you pressed Stop and saved it. [2] 
+This encapsulates everything that occurred from the moment you pressed Start on your device to the moment you pressed Stop and saved it. [2]
 
 * Activity Message: Acts as the highest container for the sports performed.
 * Primary Attribute: num_sessions (tells platforms how many sessions are nested inside).
 
 ## 3. Session Level
 
-A single activity can contain one or more sessions. In a standard workout, there is usually only 1 session. In a triathlon, there would be 5 distinct sessions (Swim, Transition 1, Bike, Transition 2, Run). [4] 
+A single activity can contain one or more sessions. In a standard workout, there is usually only 1 session. In a triathlon, there would be 5 distinct sessions (Swim, Transition 1, Bike, Transition 2, Run). [4]
 
 * Session Message: Summarizes a specific sport or leg of a workout.
-* Summary Attributes: Total distance, total calories, average heart rate, and overall time. [4, 6] 
+* Summary Attributes: Total distance, total calories, average heart rate, and overall time. [4, 6]
 
 ## 4. Lap Level
 
-Every Session is broken down into segments called Laps. These can be 1-mile auto-splits or custom segments triggered manually. [1, 4, 7, 8] 
+Every Session is broken down into segments called Laps. These can be 1-mile auto-splits or custom segments triggered manually. [1, 4, 7, 8]
 
 * Lap Message: Summarizes a block of time within a specific session.
-* Attributes: Lap number, lap distance, split time, and average speed for just that segment. [3, 4, 7, 8] 
+* Attributes: Lap number, lap distance, split time, and average speed for just that segment. [3, 4, 7, 8]
 
 ## 5. Record & Event Level (The Leaves)
 
@@ -106,11 +131,11 @@ This is the granular, chronological data recorded every second (or by smart-reco
 * Record Message: The actual real-time sensor measurements.
 * Attributes: Timestamp, GPS coordinates, heart rate, power, cadence, and speed.
 * Event Message: Interspersed between records to signal state changes.
-* Attributes: Timer pauses, marker drops, or manual laps. [1, 3, 8, 10] 
+* Attributes: Timer pauses, marker drops, or manual laps. [1, 3, 8, 10]
 
 ------------------------------
 
-## 📐 The Hierarchy Visualized
+## 📐 The Hierarchy Visualized (only correct for files of type Activity)
 
 [File ID]
 └── [Activity]

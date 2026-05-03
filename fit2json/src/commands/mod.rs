@@ -1,6 +1,7 @@
 pub mod compare;
 pub mod dump;
 pub mod events;
+pub mod filetype;
 pub mod gps;
 pub mod info;
 pub mod laps;
@@ -28,6 +29,7 @@ pub fn dispatch(cli: Cli) -> Result<()> {
         Command::Laps(args)     => laps::run(&cli.global, args),
         Command::Validate(args) => validate::run(&cli.global, args),
         Command::Compare(args)  => compare::run(&cli.global, args),
+        Command::FileType(args) => filetype::run(&cli.global, args),
     }
 }
 
@@ -69,5 +71,27 @@ pub fn to_json(global: &GlobalArgs, value: &impl Serialize) -> Result<String> {
         Ok(serde_json::to_string_pretty(value)?)
     } else {
         Ok(serde_json::to_string(value)?)
+    }
+}
+
+/// Return `Ok(())` if `data` is from an activity file (or the file type cannot
+/// be determined), otherwise return a descriptive error naming `cmd`.
+///
+/// Insert this check near the top of any subcommand that requires the activity
+/// hierarchy (sessions, laps, info, stats --by session/lap, compare).
+pub fn require_activity_file(
+    data: &[fitparser::FitDataRecord],
+    cmd: &str,
+) -> Result<()> {
+    match fitlib::file_type(data).as_deref() {
+        // "activity" or field absent — allow through
+        Some("activity") | None => Ok(()),
+        Some(ft) => Err(anyhow::anyhow!(
+            "The `{}` subcommand only applies to activity files.\n\
+             This file has type `{}`. \
+             Use `fit2json dump` or `fit2json types` for non-activity files.",
+            cmd,
+            ft
+        )),
     }
 }

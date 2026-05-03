@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::commands::{
-    compare::CompareArgs, dump::DumpArgs, events::EventsArgs, gps::GpsArgs, info::InfoArgs,
-    laps::LapsArgs, select::SelectArgs, sessions::SessionsArgs, stats::StatsArgs,
-    types::TypesArgs, validate::ValidateArgs,
+    compare::CompareArgs, dump::DumpArgs, events::EventsArgs, filetype::FileTypeArgs,
+    gps::GpsArgs, info::InfoArgs, laps::LapsArgs, select::SelectArgs, sessions::SessionsArgs,
+    stats::StatsArgs, types::TypesArgs, validate::ValidateArgs,
 };
 
 /// Command-line tool for querying and extracting data from Garmin FIT files.
@@ -76,4 +76,7 @@ pub enum Command {
     Validate(ValidateArgs),
     /// Compare statistics between two FIT files.
     Compare(CompareArgs),
+    /// Report the FIT file type from the file_id record (activity, workout, course, …).
+    #[command(name = "filetype")]
+    FileType(FileTypeArgs),
 }
