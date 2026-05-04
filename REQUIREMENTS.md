@@ -58,7 +58,7 @@ Processing a typical single-activity FIT file (up to 10 000 records) shall compl
 #### REQ-PERF-002 ✅
 Per-file record scanning shall use sequential iteration. Rayon parallelism shall not be used within a single file's processing pipeline; the overhead of thread-pool coordination exceeds the work for file sizes of 3 000–8 000 records.
 
-#### REQ-PERF-003 📋
+#### REQ-PERF-003 ✅
 When processing a directory of FIT files (`fitdir`), parallelism shall be applied at the file level using `rayon::par_iter`, where the work per task (parsing an entire file) is large enough to amortise thread-pool overhead.
 
 #### REQ-PERF-004 ✅
@@ -376,26 +376,86 @@ Latitude and longitude stored as Garmin semicircles (signed 32-bit integers) sha
 
 ## 6. fitdir — batch directory tool
 
-### REQ-DIR-001 📋
-`fitdir --dir <path>` shall discover and process all `*.fit` files found at the given path.
+### REQ-DIR-001 ✅
+`fitdir survey --dir <path>` shall discover and process all `*.fit` files found at the given path.
 
-### REQ-DIR-002 📋
-`--recursive` shall extend discovery to all subdirectories.
+### REQ-DIR-002 ✅
+`--recursive` (`-r`) shall extend discovery to all subdirectories.
 
-### REQ-DIR-003 📋
-`--jobs <n>` shall control the number of worker threads used for parallel file processing. Default: number of logical CPUs.
+### REQ-DIR-003 ✅
+`--jobs <n>` (`-j`) shall control the number of worker threads used for parallel file processing. Default: number of logical CPUs.
 
-### REQ-DIR-004 📋
-`--subcommand <name>` shall specify which `fitlib` operation to apply to each file (e.g. `info`, `dump`, `validate`).
+### REQ-DIR-004 ✅
+`fitdir` shall use named subcommands (e.g. `survey`, `list`, `info`, `dump`, `validate`) rather than a generic `--subcommand <name>` flag. This follows the same clap subcommand pattern as `fit2json` and allows each subcommand to define its own flags cleanly. (`survey` and `list` are implemented; further subcommands are planned.)
 
 ### REQ-DIR-005 📋
-`--output-dir <path>` shall write one output file per input file into the specified directory.
+`--output-dir <path>` shall write one output file per input file into the specified directory. *(Planned for `info` and `dump` batch subcommands.)*
 
-### REQ-DIR-006 📋
+### REQ-DIR-006 ✅
 A file that fails to parse shall produce an error message on stderr and be skipped; processing of other files shall continue.
 
-### REQ-DIR-007 📋
+### REQ-DIR-007 ✅
 `fitdir` shall use `rayon::par_iter` for file-level parallelism. No parallelism shall be applied within the processing of a single file.
+
+---
+
+### 6.1 `survey` — directory overview
+
+#### REQ-DIR-SURVEY-001 ✅
+`fitdir survey` shall scan a directory of FIT files and produce a per-type statistical overview grouped by the `file_id.type` field.
+
+#### REQ-DIR-SURVEY-002 ✅
+For each distinct file type the report shall include:
+- File count.
+- Byte-size distribution: minimum, mean, median, and maximum.
+- Record-count distribution: minimum, mean, median, and maximum.
+- Date range: oldest and newest `time_created` from the `file_id` record (ISO 8601 date strings).
+
+#### REQ-DIR-SURVEY-003 ✅
+`--format table` (default) shall render a human-readable aligned table sorted by file count descending.
+
+#### REQ-DIR-SURVEY-004 ✅
+`--format json` shall emit a JSON array of per-type statistics objects with raw byte values, suitable for downstream processing with `jq` or import into a database.
+
+#### REQ-DIR-SURVEY-005 ✅
+The per-file data collection logic (`fitlib::survey::collect_sample`) and the aggregation logic (`fitlib::survey::summarize`) shall reside in `fitlib`, not in `fitdir`. `fitdir` is responsible only for directory traversal, parallelism, and rendering.
+
+---
+
+### 6.2 `list` — per-file listing
+
+#### REQ-DIR-LIST-001 ✅
+`fitdir list` shall enumerate individual FIT files in a directory, one per output row, and show the path, file type, file size, record count, and `time_created` date for each file.
+
+#### REQ-DIR-LIST-002 ✅
+`--type <type>` (`-t`) shall filter the results to files whose `file_id.type` matches the given string (case-insensitive). The flag shall be repeatable; a file is included if it matches any of the specified types. Omitting `--type` shall list all files regardless of type.
+
+#### REQ-DIR-LIST-003 ✅
+The `--sort` flag shall control the primary sort key:
+
+| Value | Primary key | Tiebreaker |
+|---|---|---|
+| `date` (default) | `time_created` | full path |
+| `size` | `size_bytes` | full path |
+| `records` | `record_count` | full path |
+| `name` | filename (case-insensitive) | `time_created` |
+
+Files without a `time_created` date shall always sort after files that have one, regardless of whether `--desc` is set.
+
+#### REQ-DIR-LIST-004 ✅
+`--desc` shall reverse the primary sort order.
+
+#### REQ-DIR-LIST-005 ✅
+`--limit <n>` (`-n`) shall truncate the output to at most `n` rows after sorting.
+
+#### REQ-DIR-LIST-006 ✅
+`--format table` (default) shall render a human-readable aligned table with columns: row number, date (`YYYY-MM-DD` or `—`), type, size (K/M), record count, file path.
+
+#### REQ-DIR-LIST-007 ✅
+`--format json` shall emit a JSON array of objects, one per file, with raw numeric byte values.
+
+#### REQ-DIR-LIST-008 ✅
+The `FileEntry` struct (`fitlib::survey::FileEntry`) and `to_file_entry` constructor shall reside in `fitlib`. `fitdir list` is responsible only for directory traversal, parallelism, filtering, sorting, and rendering.
 
 ---
 
@@ -498,3 +558,5 @@ If no configuration file is found the tool shall start without error using built
 | Date | Change |
 |---|---|
 | 2026-05-03 | Initial version; captures all requirements discussed during project inception and first implementation sprint. |
+| 2026-05-03 | Marked REQ-PERF-003, REQ-DIR-001/002/003/006/007 ✅. Revised REQ-DIR-004 to reflect subcommand-based CLI design. Added REQ-DIR-SURVEY-001–005 for the implemented `survey` subcommand. |
+| 2026-05-03 | Marked REQ-DIR-004 ✅ (both `survey` and `list` now implemented). Added REQ-DIR-LIST-001–008 for the implemented `list` subcommand. |

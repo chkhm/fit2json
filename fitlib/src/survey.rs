@@ -1,16 +1,24 @@
 /// Directory-level FIT file survey — collect and aggregate per-file metadata.
 ///
-/// The typical usage pattern in a batch tool:
+/// Two usage patterns are supported:
 ///
+/// **Aggregate survey** (`fitdir survey`):
 /// ```text
-/// // per file (in parallel):
+/// let size   = std::fs::metadata(path)?.len();
+/// let data   = fitlib::parse::load_file(path)?;
+/// let sample = fitlib::survey::collect_sample(size, &data);
+/// // … collect many samples …
+/// let stats  = fitlib::survey::summarize(&samples);
+/// ```
+///
+/// **Per-file listing** (`fitdir list`):
+/// ```text
 /// let size  = std::fs::metadata(path)?.len();
 /// let data  = fitlib::parse::load_file(path)?;
-/// let sample = fitlib::survey::collect_sample(size, &data);
-///
-/// // once all files are collected:
-/// let stats = fitlib::survey::summarize(&samples);
+/// let entry = fitlib::survey::to_file_entry(path.to_path_buf(), size, &data);
 /// ```
+use std::path::PathBuf;
+
 use chrono::{DateTime, Local};
 use fitparser::profile::field_types::MesgNum;
 use fitparser::{FitDataRecord, Value};
@@ -61,6 +69,28 @@ pub struct TypeStats {
     pub newest_date: Option<String>,
 }
 
+/// Per-file entry produced by the listing pipeline (`fitdir list`).
+///
+/// Holds the same per-file statistics as [`FileSurveySample`] plus the file
+/// path, making it suitable for sorted, filtered, per-row display.
+///
+/// # Future extensions
+///
+/// The struct is designed to accommodate sport metadata in a future phase:
+/// uncomment the `sport` / `sub_sport` fields and populate them from the first
+/// `session` record for `file_type == "activity"` files.
+#[derive(Debug, Clone, Serialize)]
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub file_type: String,
+    pub size_bytes: u64,
+    pub record_count: usize,
+    pub time_created: Option<DateTime<Local>>,
+    // Phase 2 — activity sport filtering:
+    // pub sport: Option<String>,
+    // pub sub_sport: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -75,6 +105,21 @@ pub fn collect_sample(size_bytes: u64, data: &[FitDataRecord]) -> FileSurveySamp
     let record_count = data.len();
     let time_created = extract_time_created(data);
     FileSurveySample { file_type, size_bytes, record_count, time_created }
+}
+
+/// Build a [`FileEntry`] from an already-parsed FIT file.
+///
+/// `path` is stored as-is (the caller controls whether it is absolute or
+/// relative).  `size_bytes` must be supplied by the caller via
+/// `std::fs::metadata(path)?.len()`.
+pub fn to_file_entry(path: PathBuf, size_bytes: u64, data: &[FitDataRecord]) -> FileEntry {
+    FileEntry {
+        file_type:    crate::file_type(data).unwrap_or_else(|| "unknown".to_string()),
+        record_count: data.len(),
+        time_created: extract_time_created(data),
+        path,
+        size_bytes,
+    }
 }
 
 /// Group [`FileSurveySample`]s by file type and compute per-group statistics.

@@ -15,7 +15,7 @@ For the requirements catalogue see [REQUIREMENTS.md](REQUIREMENTS.md).
 3. [Repository layout](#repository-layout)
 4. [Library crate — `fitlib`](#library-crate--fitlib)
 5. [Binary crate — `fit2json`](#binary-crate--fit2json)
-6. [Future binary crates](#future-binary-crates)
+6. [Binary crate — `fitdir`](#binary-crate--fitdir)
 7. [Design decisions](#design-decisions)
 8. [Dependency rationale](#dependency-rationale)
 9. [Roadmap](#roadmap)
@@ -96,7 +96,8 @@ fit2json/                       ← workspace root
 │       ├── timestamp.rs
 │       ├── stats.rs
 │       ├── gps.rs
-│       └── validate.rs
+│       ├── validate.rs
+│       └── survey.rs
 │
 ├── fit2json/                   ← primary CLI binary
 │   ├── Cargo.toml
@@ -118,9 +119,14 @@ fit2json/                       ← workspace root
 │           ├── compare.rs
 │           └── filetype.rs
 │
-├── fitdir/                     ← batch-directory binary (stub)
+├── fitdir/                     ← batch-directory binary
 │   ├── Cargo.toml
-│   └── src/main.rs
+│   └── src/
+│       ├── main.rs
+│       ├── cli.rs
+│       └── commands/
+│           ├── mod.rs
+│           └── survey.rs
 │
 └── fithistory/                 ← Garmin Connect ZIP binary (stub)
     ├── Cargo.toml
@@ -236,6 +242,47 @@ Garmin devices store latitude and longitude as **semicircles** (signed 32-bit in
 
 GeoJSON is constructed as `serde_json::Value` directly — no additional crate is needed for a standard LineString Feature.
 
+### `survey.rs` — directory-level statistics
+
+The module supports two usage patterns: aggregate statistics (used by `fitdir survey`) and per-file listing (used by `fitdir list`).
+
+**Aggregate path:**
+
+```rust
+pub struct FileSurveySample { pub file_type: String, pub size_bytes: u64,
+                               pub record_count: usize, pub time_created: Option<DateTime<Local>> }
+pub struct TypeStats { pub file_type: String, pub file_count: usize,
+                       pub size_min_bytes: u64, pub size_max_bytes: u64,
+                       pub size_mean_bytes: f64, pub size_median_bytes: f64,
+                       pub records_min: usize, pub records_max: usize,
+                       pub records_mean: f64, pub records_median: f64,
+                       pub oldest_date: Option<String>, pub newest_date: Option<String> }
+
+pub fn collect_sample(size_bytes: u64, data: &[FitDataRecord]) -> FileSurveySample
+pub fn summarize(samples: &[FileSurveySample]) -> Vec<TypeStats>
+```
+
+`collect_sample` is the per-file primitive: it calls `crate::file_type(data)` for the type string, reads `data.len()` for the record count, and scans the `file_id` record once for `time_created`.  It is designed to be called from a `rayon::par_iter` — it takes only a `u64` and a slice reference, not a path, so filesystem access (the `metadata` call for `size_bytes`) stays in the caller.
+
+`summarize` groups samples by file type into a `HashMap`, sorts the per-group size and record-count vectors (for exact median), and builds one `TypeStats` per distinct type.  Output is sorted by `file_count` descending so the most common type appears first.  The entire computation is single-threaded and allocation-light; the expensive part is the parallel parse phase in `fitdir`, not the aggregation.
+
+**Per-file listing path:**
+
+```rust
+pub struct FileEntry {
+    pub path: PathBuf,
+    pub file_type: String,
+    pub size_bytes: u64,
+    pub record_count: usize,
+    pub time_created: Option<DateTime<Local>>,
+    // Phase 2: pub sport: Option<String>, pub sub_sport: Option<String>,
+}
+
+pub fn to_file_entry(path: PathBuf, size_bytes: u64, data: &[FitDataRecord]) -> FileEntry
+```
+
+`FileEntry` extends `FileSurveySample` with a `path` field.  It derives `Serialize` so it can be emitted directly as JSON by `fitdir list --format json`.  The commented-out `sport` / `sub_sport` fields mark the intended extension point for Phase 2 sport-type filtering without requiring a redesign of the struct or the public API.
+
 ### `validate.rs` — integrity checks
 
 `validate(data)` runs all checks and returns a `ValidationReport`:
@@ -301,18 +348,70 @@ No domain logic is written in these files; they are pure glue between the CLI su
 
 ---
 
-## Future binary crates
+## Binary crate — `fitdir`
 
-### `fitdir`
+`fitdir` processes all `*.fit` files in a directory.  The outer loop uses `walkdir` for cross-platform recursive traversal and `rayon::par_iter` for **file-level** parallelism — the one context where rayon pays off.  Per-file logic is entirely delegated to `fitlib`.
 
-Processes all `*.fit` files in a directory.  The outer loop uses `walkdir` for cross-platform recursive traversal and `rayon::par_iter` for **file-level** parallelism — the one context where rayon pays off.  Per-file logic is entirely delegated to `fitlib`.
+### `cli.rs`
+
+Defines `Cli` (global output flags: `--output`, `--pretty`, `--compact`) and a `Command` enum with one variant per subcommand, following the same pattern as `fit2json`.  Global output flags are separated into an `OutputOpts` struct before dispatch so the `Command` enum variant can be moved without a partial-move error.
+
+### `commands/mod.rs`
+
+Dispatches to subcommand `run` functions and exposes two shared helpers used by all subcommands:
+
+| Helper | Purpose |
+|---|---|
+| `OutputOpts` | Holds `--output`, `--pretty`, `--compact`; `write(content)` writes to file or stdout; `use_pretty()` resolves the pretty/compact flag. |
+| `collect_fit_paths` | Walks a directory with `walkdir` and returns all `*.fit` paths; respects `--recursive`. |
+
+No per-file input helpers are needed because `fitdir` subcommands operate on directories rather than individual files.
+
+### `commands/survey.rs` — implemented
+
+Scans a directory with `collect_fit_paths`, parses files in parallel with `rayon::par_iter`, calls `fitlib::survey::collect_sample` per file, then calls `fitlib::survey::summarize` and renders the result.
 
 ```sh
-fitdir --dir ~/activities/ --subcommand info --output-dir ./summaries/
-fitdir --dir ~/activities/ --recursive --jobs 8
+fitdir survey --dir ~/activities/                  # table output
+fitdir survey --dir ~/Garmin/ --recursive          # recursive
+fitdir survey --dir ~/Garmin/ --format json        # machine-readable
+fitdir survey --dir ~/Garmin/ --jobs 4             # limit parallelism
 ```
 
-### `fithistory`
+Files that fail to parse are logged to stderr and skipped (REQ-DIR-006); the scan continues.
+
+### `commands/list.rs` — implemented
+
+Lists individual files, one per row, with optional type filtering, configurable sort order, and a row limit.
+
+```sh
+fitdir list --dir ~/activities/                              # all files, sorted by date
+fitdir list --dir ~/Garmin/ --type activity                  # only activity files
+fitdir list --dir ~/Garmin/ --type activity --sort date --desc --limit 10
+fitdir list --dir ~/Garmin/ --type monitoring_b --format json
+```
+
+**Sort fields**: `date` (default; `None` sorts last regardless of direction), `size`, `records`, `name` (case-insensitive filename).
+
+**Tiebreaker**: all sort fields break ties on the full path, except `name` which breaks ties on `time_created`.
+
+**`--desc`** reverses the primary sort key; the `None`-last invariant for `date` is preserved by reversing only the `Some`/`Some` comparison, not the `Some`/`None` sentinel.
+
+Output formats: `table` (aligned columns: `#`, `Date`, `Type`, `Size`, `Records`, `File`) and `json` (array of `FileEntry` objects with raw byte values).
+
+### Future `fitdir` subcommands
+
+The subcommand architecture makes it straightforward to add further batch operations:
+
+```sh
+fitdir info    --dir ~/activities/           # one summary row per activity file
+fitdir dump    --dir ~/activities/ --output-dir ./json/
+fitdir validate --dir ~/activities/          # structural check on every file
+```
+
+---
+
+## Future binary crate — `fithistory`
 
 Reads a Garmin Connect bulk-export ZIP (the archive downloaded from the Connect website) without extracting it to disk.  The `zip` crate provides in-memory iteration over entries; each `*.fit` entry is piped directly to `fitlib::parse::load_reader`.
 
@@ -387,7 +486,8 @@ Items are roughly ordered by implementation dependency.
 
 ### Medium-term
 
-- [ ] `fitdir`: implement the directory walk + rayon parallel dispatch
+- [x] `fitdir survey`: directory walk + rayon parallel dispatch + per-type statistics ✅
+- [ ] `fitdir` further subcommands: `info`, `dump`, `validate` batch variants
 - [ ] `fithistory`: implement ZIP extraction + per-file processing
 - [ ] `zones` subcommand: time-in-zone analysis for HR and power
 - [ ] `devices` subcommand: list sensors and devices from `device_info` records

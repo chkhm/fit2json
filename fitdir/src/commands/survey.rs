@@ -1,13 +1,9 @@
-use std::io::Write as _;
-use std::path::{Path, PathBuf};
-
 use anyhow::Result;
 use rayon::prelude::*;
-use walkdir::WalkDir;
 
 use crate::cli::{SurveyArgs, SurveyFormat};
-use crate::commands::OutputOpts;
-use fitlib::survey::{FileSurveySample, TypeStats};
+use crate::commands::{collect_fit_paths, OutputOpts};
+use fitlib::survey::TypeStats;
 
 // ---------------------------------------------------------------------------
 // Entry point
@@ -27,12 +23,10 @@ pub fn run(out: &OutputOpts, args: SurveyArgs) -> Result<()> {
     eprintln!("Scanning {} FIT file(s)…", paths.len());
 
     // Parse in parallel; skip and warn on errors (REQ-DIR-006).
-    let samples: Vec<FileSurveySample> = paths
+    let samples: Vec<_> = paths
         .par_iter()
         .filter_map(|path| {
-            let size = std::fs::metadata(path)
-                .map(|m| m.len())
-                .unwrap_or(0);
+            let size = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
             match fitlib::parse::load_file(path) {
                 Ok(data) => Some(fitlib::survey::collect_sample(size, &data)),
                 Err(e) => {
@@ -59,62 +53,16 @@ pub fn run(out: &OutputOpts, args: SurveyArgs) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// Directory walker
-// ---------------------------------------------------------------------------
-
-fn collect_fit_paths(dir: &Path, recursive: bool) -> Result<Vec<PathBuf>> {
-    let walker = if recursive {
-        WalkDir::new(dir)
-    } else {
-        WalkDir::new(dir).max_depth(1)
-    };
-
-    let paths: Vec<PathBuf> = walker
-        .into_iter()
-        .filter_map(|entry| entry.ok())
-        .filter(|entry| {
-            entry.file_type().is_file()
-                && entry
-                    .path()
-                    .extension()
-                    .is_some_and(|ext| ext.eq_ignore_ascii_case("fit"))
-        })
-        .map(|entry| entry.path().to_path_buf())
-        .collect();
-
-    Ok(paths)
-}
-
-// ---------------------------------------------------------------------------
 // JSON output
 // ---------------------------------------------------------------------------
 
 fn output_json(out: &OutputOpts, stats: &[TypeStats]) -> Result<()> {
-    let pretty = match (out.pretty, out.compact, &out.output) {
-        (true, _, _)       => true,
-        (_, true, _)       => false,
-        (_, _, Some(_))    => true,   // file → pretty by default
-        _                  => false,  // stdout → compact by default
-    };
-
-    let json = if pretty {
+    let json = if out.use_pretty() {
         serde_json::to_string_pretty(stats)?
     } else {
         serde_json::to_string(stats)?
     };
-
-    write_output(out, &json)
-}
-
-fn write_output(out: &OutputOpts, content: &str) -> Result<()> {
-    if let Some(path) = &out.output {
-        let mut file = std::fs::File::create(path)?;
-        file.write_all(content.as_bytes())?;
-        writeln!(file)?;
-    } else {
-        println!("{content}");
-    }
-    Ok(())
+    out.write(&json)
 }
 
 // ---------------------------------------------------------------------------
@@ -131,7 +79,6 @@ fn fmt_bytes(b: f64) -> String {
 }
 
 fn output_table(out: &OutputOpts, stats: &[TypeStats]) -> Result<()> {
-    // Column widths — derive from data so the table stays compact.
     let type_w = stats
         .iter()
         .map(|s| s.file_type.len())
@@ -139,14 +86,11 @@ fn output_table(out: &OutputOpts, stats: &[TypeStats]) -> Result<()> {
         .unwrap_or(9)
         .max(9); // "File Type"
 
-    // Build lines.
     let mut lines: Vec<String> = Vec::new();
 
-    // Header
     lines.push(format!(
         "{:<type_w$}  {:>6}  {:>28}  {:>28}  {}",
-        "File Type",
-        "Files",
+        "File Type", "Files",
         "Size  min / avg / median / max",
         "Records  min / avg / median / max",
         "Date range",
@@ -164,10 +108,7 @@ fn output_table(out: &OutputOpts, stats: &[TypeStats]) -> Result<()> {
         );
         let rec_col = format!(
             "{} / {:.0} / {:.0} / {}",
-            s.records_min,
-            s.records_mean,
-            s.records_median,
-            s.records_max,
+            s.records_min, s.records_mean, s.records_median, s.records_max,
         );
         let date_col = match (&s.oldest_date, &s.newest_date) {
             (Some(a), Some(b)) if a == b => a.clone(),
@@ -177,15 +118,10 @@ fn output_table(out: &OutputOpts, stats: &[TypeStats]) -> Result<()> {
 
         lines.push(format!(
             "{:<type_w$}  {:>6}  {:>28}  {:>28}  {}",
-            s.file_type,
-            s.file_count,
-            size_col,
-            rec_col,
-            date_col,
+            s.file_type, s.file_count, size_col, rec_col, date_col,
             type_w = type_w,
         ));
     }
 
-    let table = lines.join("\n");
-    write_output(out, &table)
+    out.write(&lines.join("\n"))
 }

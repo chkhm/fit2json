@@ -9,11 +9,11 @@ A collection of fast, composable command-line tools for reading and analysing Ga
 
 ## Tools
 
-| Binary       | Purpose                                                          |
-|--------------|------------------------------------------------------------------|
-| `fit2json`   | Query, filter, and extract data from a single FIT file           |
-| `fitdir`     | Batch-process all FIT files in a directory *(planned)*           |
-| `fithistory` | Unpack and ingest a Garmin Connect bulk-export ZIP *(planned)*   |
+| Binary       | Status      | Purpose                                                        |
+|--------------|-------------|----------------------------------------------------------------|
+| `fit2json`   | ✅ Complete  | Query, filter, and extract data from a single FIT file         |
+| `fitdir`     | 🔧 Partial  | Batch-process all FIT files in a directory                     |
+| `fithistory` | 📋 Planned  | Unpack and ingest a Garmin Connect bulk-export ZIP             |
 
 ---
 
@@ -31,6 +31,7 @@ The release binaries are written to `target/release/`.  To install them to your 
 
 ```sh
 cargo install --path fit2json    # installs fit2json
+cargo install --path fitdir      # installs fitdir
 ```
 
 ---
@@ -155,7 +156,128 @@ fit2json compare monday.fit tuesday.fit --fields heart_rate,power,speed
 
 ---
 
-## Global options
+## fitdir — quick start
+
+```
+fitdir <subcommand> [options]
+```
+
+`fitdir` operates on a whole directory of FIT files at once, using parallel processing (rayon) to keep batch jobs fast.
+
+### survey — directory overview
+
+Scan a folder and report per-type statistics: file count, size distribution, record count distribution, and recording date range.
+
+```sh
+# Survey the current directory (non-recursive, table output)
+fitdir survey
+
+# Survey a specific folder
+fitdir survey --dir ~/Garmin/Activities/
+
+# Include all subdirectories
+fitdir survey --dir ~/Garmin/ --recursive
+
+# JSON output (raw bytes, suitable for jq / further processing)
+fitdir survey --dir ~/Garmin/Activities/ --format json
+
+# Save JSON output to a file (pretty-printed by default)
+fitdir survey --dir ~/Garmin/ --recursive --format json -o survey.json
+
+# Limit parallelism (default: all logical CPUs)
+fitdir survey --dir ~/Garmin/ --jobs 4
+```
+
+**Example table output** (Garmin Connect bulk export, 9 182 files):
+
+```
+File Type      Files  Size  min / avg / median / max     Records  min / avg / median / max     Date range
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+44              2712   0K / 0K / 0K / 1K                 4 / 10 / 6 / 23               2025-02-01 – 2026-04-23
+monitoring_b    2650   1K / 10K / 2K / 93K         10 / 1103 / 184 / 8446              2024-09-21 – 2026-04-23
+58              2318   0K / 4K / 1K / 21K               5 / 289 / 62 / 1445            2024-09-21 – 2026-04-23
+segment_list     392   8K / 13K / 13K / 16K              37 / 58 / 59 / 72             2025-02-04 – 2026-04-23
+activity         353   7K / 157K / 136K / 654K      72 / 8905 / 7354 / 61124           2024-11-08 – 2026-04-23
+…
+```
+
+Only ~3.8% of a typical Garmin Connect export are activity files — `survey` lets you understand what the rest actually is before processing. See [Non-activity file types](#non-activity-file-types-found-in-garmin-connect-bulk-exports) for a breakdown of the known types.
+
+### list — per-file listing
+
+Enumerate individual files with optional type filtering, configurable sort order, and a row limit.
+
+```sh
+# List all FIT files in the current directory, sorted by recording date
+fitdir list
+
+# List only activity files
+fitdir list --dir ~/Garmin/ --type activity
+
+# 10 most recent activity files
+fitdir list --dir ~/Garmin/ --type activity --sort date --desc --limit 10
+
+# 10 largest activity files
+fitdir list --dir ~/Garmin/ --type activity --sort size --desc --limit 10
+
+# List multiple types
+fitdir list --dir ~/Garmin/ --type activity --type monitoring_b
+
+# JSON output for downstream processing
+fitdir list --dir ~/Garmin/ --type activity --format json | jq '.[].path'
+
+# Write JSON to a file (pretty-printed automatically)
+fitdir list --dir ~/Garmin/ --recursive --format json -o files.json
+```
+
+**Example table output:**
+
+```
+    #  Date        Type          Size     Records  File
+────────────────────────────────────────────────────────────────────────────────────
+    1  2024-11-08  activity      136K        7354  /Garmin/Activities/2024-11-08.fit
+    2  2024-11-15  activity      148K        8201  /Garmin/Activities/2024-11-15.fit
+    3  2024-11-22  activity       92K        5103  /Garmin/Activities/2024-11-22.fit
+    4  —           unknown         2K          14  /Garmin/Activities/orphan.fit
+```
+
+Date column shows `YYYY-MM-DD`; `—` when `time_created` is absent.  Files without a date always sort last, regardless of `--desc`.
+
+### fitdir global options
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--output <file>` | `-o` | Write output to a file instead of stdout. |
+| `--pretty` | | Pretty-print JSON (default when `--output` is set). |
+| `--compact` | | Compact single-line JSON (default when writing to stdout). |
+| `--help` | `-h` | Print help for the current subcommand. |
+| `--version` | `-V` | Print the tool version. |
+
+### survey options
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--dir <path>` | `-d` | `.` | Directory to scan. |
+| `--recursive` | `-r` | off | Recurse into subdirectories. |
+| `--jobs <n>` | `-j` | all CPUs | Number of parallel worker threads. |
+| `--format <fmt>` | | `table` | Output format: `table` or `json`. |
+
+### list options
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--dir <path>` | `-d` | `.` | Directory to scan. |
+| `--recursive` | `-r` | off | Recurse into subdirectories. |
+| `--jobs <n>` | `-j` | all CPUs | Number of parallel worker threads. |
+| `--type <type>` | `-t` | (all) | Keep only files of this type. Repeatable. |
+| `--sort <field>` | | `date` | Sort key: `date`, `size`, `records`, or `name`. |
+| `--desc` | | off | Reverse sort order. |
+| `--limit <n>` | `-n` | (none) | Return at most N results. |
+| `--format <fmt>` | | `table` | Output format: `table` or `json`. |
+
+---
+
+## Global options (`fit2json`)
 
 These flags work with every subcommand.
 
