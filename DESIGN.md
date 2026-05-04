@@ -275,13 +275,14 @@ pub struct FileEntry {
     pub size_bytes: u64,
     pub record_count: usize,
     pub time_created: Option<DateTime<Local>>,
-    // Phase 2: pub sport: Option<String>, pub sub_sport: Option<String>,
+    pub sports: Vec<String>,      // one entry per session; empty for non-activity files
+    pub sub_sports: Vec<String>,  // parallel to sports
 }
 
 pub fn to_file_entry(path: PathBuf, size_bytes: u64, data: &[FitDataRecord]) -> FileEntry
 ```
 
-`FileEntry` extends `FileSurveySample` with a `path` field.  It derives `Serialize` so it can be emitted directly as JSON by `fitdir list --format json`.  The commented-out `sport` / `sub_sport` fields mark the intended extension point for Phase 2 sport-type filtering without requiring a redesign of the struct or the public API.
+`FileEntry` derives `Serialize` so it is emitted directly as JSON by `fitdir list --format json`.  `sports` / `sub_sports` are populated by scanning `session` records in the flat message slice — no call to `build_activity()` is needed.  Multiple entries in `sports` indicate a multi-sport file (triathlon, duathlon); `fitdir list` displays them joined by `+` in the `Sport` table column as a visual multi-sport marker.
 
 ### `validate.rs` — integrity checks
 
@@ -397,7 +398,9 @@ fitdir list --dir ~/Garmin/ --type monitoring_b --format json
 
 **`--desc`** reverses the primary sort key; the `None`-last invariant for `date` is preserved by reversing only the `Some`/`Some` comparison, not the `Some`/`None` sentinel.
 
-Output formats: `table` (aligned columns: `#`, `Date`, `Type`, `Size`, `Records`, `File`) and `json` (array of `FileEntry` objects with raw byte values).
+**Sport filter**: `--sport cycling` (repeatable, short `-s`) retains only files where at least one session record has a matching sport value (case-insensitive). Multi-value: `--sport cycling --sport swimming` includes files matching either sport.
+
+Output formats: `table` (aligned columns: `#`, `Date`, `Type`, `Sport`, `Size`, `Records`, `File`) and `json` (array of `FileEntry` objects with raw byte values).  The `Sport` column shows `—` for non-activity files, the sport name for single-sport files, and `sport1+sport2` for multi-sport files.  Sub-sport is not shown in the table but is present in the JSON `sub_sports` array.
 
 ### Future `fitdir` subcommands
 

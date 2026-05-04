@@ -220,10 +220,16 @@ fitdir list --dir ~/Garmin/ --type activity --sort date --desc --limit 10
 # 10 largest activity files
 fitdir list --dir ~/Garmin/ --type activity --sort size --desc --limit 10
 
+# Filter by sport
+fitdir list --dir ~/Garmin/ --type activity --sport cycling
+
+# Multiple sports at once
+fitdir list --dir ~/Garmin/ --type activity --sport cycling --sport swimming
+
 # List multiple types
 fitdir list --dir ~/Garmin/ --type activity --type monitoring_b
 
-# JSON output for downstream processing
+# JSON output for downstream processing (includes sub_sports array)
 fitdir list --dir ~/Garmin/ --type activity --format json | jq '.[].path'
 
 # Write JSON to a file (pretty-printed automatically)
@@ -233,15 +239,15 @@ fitdir list --dir ~/Garmin/ --recursive --format json -o files.json
 **Example table output:**
 
 ```
-    #  Date        Type          Size     Records  File
-────────────────────────────────────────────────────────────────────────────────────
-    1  2024-11-08  activity      136K        7354  /Garmin/Activities/2024-11-08.fit
-    2  2024-11-15  activity      148K        8201  /Garmin/Activities/2024-11-15.fit
-    3  2024-11-22  activity       92K        5103  /Garmin/Activities/2024-11-22.fit
-    4  —           unknown         2K          14  /Garmin/Activities/orphan.fit
+    #  Date        Type      Sport              Size     Records  File
+─────────────────────────────────────────────────────────────────────────────────────────
+    1  2024-11-08  activity  cycling            136K        7354  /Garmin/Activities/2024-11-08.fit
+    2  2024-11-15  activity  cycling            148K        8201  /Garmin/Activities/2024-11-15.fit
+    3  2024-11-22  activity  cycling+running     92K        5103  /Garmin/Activities/2024-11-22.fit
+    4  —           unknown   —                    2K          14  /Garmin/Activities/orphan.fit
 ```
 
-Date column shows `YYYY-MM-DD`; `—` when `time_created` is absent.  Files without a date always sort last, regardless of `--desc`.
+Date column shows `YYYY-MM-DD`; `—` when `time_created` is absent.  Files without a date always sort last, regardless of `--desc`.  Multi-sport files (triathlon, duathlon) show all distinct sports joined by `+` in the `Sport` column.  Sub-sport detail is available via `--format json` in the `sub_sports` array.
 
 ### fitdir global options
 
@@ -270,6 +276,7 @@ Date column shows `YYYY-MM-DD`; `—` when `time_created` is absent.  Files with
 | `--recursive` | `-r` | off | Recurse into subdirectories. |
 | `--jobs <n>` | `-j` | all CPUs | Number of parallel worker threads. |
 | `--type <type>` | `-t` | (all) | Keep only files of this type. Repeatable. |
+| `--sport <sport>` | `-s` | (all) | Keep only files whose sessions include this sport. Repeatable. |
 | `--sort <field>` | | `date` | Sort key: `date`, `size`, `records`, or `name`. |
 | `--desc` | | off | Reverse sort order. |
 | `--limit <n>` | `-n` | (none) | Return at most N results. |

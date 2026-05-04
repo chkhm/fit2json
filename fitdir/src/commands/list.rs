@@ -55,6 +55,16 @@ pub fn run(out: &OutputOpts, args: ListArgs) -> Result<()> {
         }
     }
 
+    // Filter by --sport (case-insensitive, any-session match).
+    if !args.sports.is_empty() {
+        let sports_lc: Vec<String> = args.sports.iter().map(|s| s.to_lowercase()).collect();
+        entries.retain(|e| e.sports.iter().any(|s| sports_lc.contains(&s.to_lowercase())));
+        if entries.is_empty() {
+            eprintln!("No files matched the requested sport(s).");
+            return Ok(());
+        }
+    }
+
     // Sort.
     entries.sort_unstable_by(|a, b| {
         let ord = match args.sort {
@@ -134,6 +144,21 @@ fn fmt_bytes(b: u64) -> String {
     }
 }
 
+/// Format the sport column value for a `FileEntry`.
+///
+/// * No sessions (non-activity) → `"—"`
+/// * One unique sport → `"cycling"`
+/// * Multiple distinct sports → `"cycling+running"` (acts as multi-sport marker)
+fn fmt_sport(e: &FileEntry) -> String {
+    let mut seen = std::collections::HashSet::new();
+    let unique: Vec<&str> = e
+        .sports
+        .iter()
+        .filter_map(|s| if seen.insert(s.as_str()) { Some(s.as_str()) } else { None })
+        .collect();
+    if unique.is_empty() { "—".to_string() } else { unique.join("+") }
+}
+
 fn output_table(out: &OutputOpts, entries: &[FileEntry]) -> Result<()> {
     // Derive column widths from data.
     let type_w = entries
@@ -142,6 +167,13 @@ fn output_table(out: &OutputOpts, entries: &[FileEntry]) -> Result<()> {
         .max()
         .unwrap_or(4)
         .max(4); // "Type"
+
+    let sport_w = entries
+        .iter()
+        .map(|e| fmt_sport(e).len())
+        .max()
+        .unwrap_or(5)
+        .max(5); // "Sport"
 
     let path_w = entries
         .iter()
@@ -154,11 +186,13 @@ fn output_table(out: &OutputOpts, entries: &[FileEntry]) -> Result<()> {
 
     // Header.
     lines.push(format!(
-        "{:>5}  {:<10}  {:<type_w$}  {:>7}  {:>7}  {:<path_w$}",
-        "#", "Date", "Type", "Size", "Records", "File",
-        type_w = type_w, path_w = path_w,
+        "{:>5}  {:<10}  {:<type_w$}  {:<sport_w$}  {:>7}  {:>7}  {:<path_w$}",
+        "#", "Date", "Type", "Sport", "Size", "Records", "File",
+        type_w = type_w, sport_w = sport_w, path_w = path_w,
     ));
-    lines.push("─".repeat(5 + 2 + 10 + 2 + type_w + 2 + 7 + 2 + 7 + 2 + path_w));
+    lines.push(
+        "─".repeat(5 + 2 + 10 + 2 + type_w + 2 + sport_w + 2 + 7 + 2 + 7 + 2 + path_w),
+    );
 
     // Rows.
     for (i, e) in entries.iter().enumerate() {
@@ -167,14 +201,15 @@ fn output_table(out: &OutputOpts, entries: &[FileEntry]) -> Result<()> {
             .unwrap_or_else(|| "—".to_string());
 
         lines.push(format!(
-            "{:>5}  {:<10}  {:<type_w$}  {:>7}  {:>7}  {}",
+            "{:>5}  {:<10}  {:<type_w$}  {:<sport_w$}  {:>7}  {:>7}  {}",
             i + 1,
             date,
             e.file_type,
+            fmt_sport(e),
             fmt_bytes(e.size_bytes),
             e.record_count,
             e.path.display(),
-            type_w = type_w,
+            type_w = type_w, sport_w = sport_w,
         ));
     }
 

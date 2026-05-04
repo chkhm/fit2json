@@ -457,6 +457,12 @@ Files without a `time_created` date shall always sort after files that have one,
 #### REQ-DIR-LIST-008 ✅
 The `FileEntry` struct (`fitlib::survey::FileEntry`) and `to_file_entry` constructor shall reside in `fitlib`. `fitdir list` is responsible only for directory traversal, parallelism, filtering, sorting, and rendering.
 
+#### REQ-DIR-LIST-009 ✅
+`--sport <sport>` (short: `-s`) shall filter results to files where *at least one* session record has a matching `sport` value. The flag shall be repeatable (`--sport cycling --sport running`); a file is included if any session matches any of the requested sports. Matching shall be case-insensitive.
+
+#### REQ-DIR-LIST-010 ✅
+The table output shall include a `Sport` column showing the sport(s) of the file's session records. Non-activity files (no session records) shall display `—`. A file with multiple sessions that have *different* sports shall display all unique sports joined by `+` (e.g. `cycling+running`); this concatenated form serves as the multi-sport marker. Sub-sport is not shown in the table but is present in JSON output as `sub_sports`.
+
 ---
 
 ## 7. fithistory — Garmin Connect export tool
@@ -560,3 +566,4 @@ If no configuration file is found the tool shall start without error using built
 | 2026-05-03 | Initial version; captures all requirements discussed during project inception and first implementation sprint. |
 | 2026-05-03 | Marked REQ-PERF-003, REQ-DIR-001/002/003/006/007 ✅. Revised REQ-DIR-004 to reflect subcommand-based CLI design. Added REQ-DIR-SURVEY-001–005 for the implemented `survey` subcommand. |
 | 2026-05-03 | Marked REQ-DIR-004 ✅ (both `survey` and `list` now implemented). Added REQ-DIR-LIST-001–008 for the implemented `list` subcommand. |
+| 2026-05-03 | Added REQ-DIR-LIST-009–010 for `--sport` filter and multi-sport marker in `fitdir list`. |

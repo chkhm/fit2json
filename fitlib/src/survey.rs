@@ -73,12 +73,6 @@ pub struct TypeStats {
 ///
 /// Holds the same per-file statistics as [`FileSurveySample`] plus the file
 /// path, making it suitable for sorted, filtered, per-row display.
-///
-/// # Future extensions
-///
-/// The struct is designed to accommodate sport metadata in a future phase:
-/// uncomment the `sport` / `sub_sport` fields and populate them from the first
-/// `session` record for `file_type == "activity"` files.
 #[derive(Debug, Clone, Serialize)]
 pub struct FileEntry {
     pub path: PathBuf,
@@ -86,9 +80,12 @@ pub struct FileEntry {
     pub size_bytes: u64,
     pub record_count: usize,
     pub time_created: Option<DateTime<Local>>,
-    // Phase 2 — activity sport filtering:
-    // pub sport: Option<String>,
-    // pub sub_sport: Option<String>,
+    /// Sport(s) from `session` records.  Empty for non-activity files.
+    /// Multiple entries indicate a multi-sport activity (e.g. triathlon).
+    pub sports: Vec<String>,
+    /// Sub-sport(s) parallel to [`FileEntry::sports`].  Sourced from the
+    /// `sub_sport` field on each `session` record.
+    pub sub_sports: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -113,12 +110,35 @@ pub fn collect_sample(size_bytes: u64, data: &[FitDataRecord]) -> FileSurveySamp
 /// relative).  `size_bytes` must be supplied by the caller via
 /// `std::fs::metadata(path)?.len()`.
 pub fn to_file_entry(path: PathBuf, size_bytes: u64, data: &[FitDataRecord]) -> FileEntry {
+    // Collect sport / sub_sport from every session record (order preserved).
+    let sessions: Vec<(String, String)> = data
+        .iter()
+        .filter(|r| r.kind() == MesgNum::Session)
+        .map(|r| {
+            let sport = r
+                .fields()
+                .iter()
+                .find(|f| f.name() == "sport")
+                .map(|f| f.value().to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let sub_sport = r
+                .fields()
+                .iter()
+                .find(|f| f.name() == "sub_sport")
+                .map(|f| f.value().to_string())
+                .unwrap_or_else(|| "generic".to_string());
+            (sport, sub_sport)
+        })
+        .collect();
+
     FileEntry {
         file_type:    crate::file_type(data).unwrap_or_else(|| "unknown".to_string()),
         record_count: data.len(),
         time_created: extract_time_created(data),
         path,
         size_bytes,
+        sports:     sessions.iter().map(|(s, _)| s.clone()).collect(),
+        sub_sports: sessions.iter().map(|(_, ss)| ss.clone()).collect(),
     }
 }
 

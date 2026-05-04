@@ -97,6 +97,13 @@ pub struct ListArgs {
     #[arg(long = "type", short = 't')]
     pub types: Vec<String>,
 
+    /// Filter by activity sport. Repeatable: --sport cycling --sport running.
+    /// A file is included if any of its sessions matches.
+    /// Uses the lowercase strings shown in the Sport column (cycling, running,
+    /// swimming, hiking, …). Omit to list all sports.
+    #[arg(long = "sport", short = 's')]
+    pub sports: Vec<String>,
+
     /// Field to sort by.
     #[arg(long, value_enum, default_value = "date")]
     pub sort: SortField,
